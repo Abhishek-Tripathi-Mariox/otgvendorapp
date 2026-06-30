@@ -8,12 +8,83 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  Modal,
+  Pressable,
+  PermissionsAndroid,
+  Platform,
 } from 'react-native';
 import BottomNavBar from '../components/BottomNavBar';
 import {useSidebar} from '../components/SidebarProvider';
 import NotificationBell from '../components/NotificationBell';
-import {launchImageLibrary} from 'react-native-image-picker';
+import {launchCamera, launchImageLibrary} from 'react-native-image-picker';
+import {
+  pick,
+  types as docTypes,
+  isErrorWithCode,
+  errorCodes,
+} from '@react-native-documents/picker';
 import {submitVendorQc, uploadVendorImage} from '../services/orders';
+
+// Guess a mime from the file name when the OS reports a generic/empty type.
+const mimeFromName = (name?: string): string | undefined => {
+  const ext = name?.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'pdf':
+      return 'application/pdf';
+    case 'png':
+      return 'image/png';
+    case 'webp':
+      return 'image/webp';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    default:
+      return undefined;
+  }
+};
+
+// Read a picked file (file:// or content:// uri) into a base64 data URI.
+const fileToDataUri = async (
+  uri: string,
+  type?: string | null,
+  name?: string | null,
+): Promise<string> => {
+  const res = await fetch(uri);
+  const blob = await res.blob();
+  const dataUrl: string = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error('Could not read file'));
+    reader.readAsDataURL(blob);
+  });
+  const base64 = dataUrl.split(',')[1] ?? '';
+  const mime =
+    (type && type !== 'application/octet-stream' ? type : undefined) ||
+    mimeFromName(name || undefined) ||
+    (blob.type && blob.type !== 'application/octet-stream'
+      ? blob.type
+      : undefined) ||
+    'image/jpeg';
+  return `data:${mime};base64,${base64}`;
+};
+
+const ensureCameraPermission = async (): Promise<boolean> => {
+  if (Platform.OS !== 'android') return true;
+  try {
+    const result = await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.CAMERA,
+      {
+        title: 'Camera permission',
+        message: 'Allow camera access to capture the photo.',
+        buttonPositive: 'OK',
+        buttonNegative: 'Cancel',
+      },
+    );
+    return result === PermissionsAndroid.RESULTS.GRANTED;
+  } catch {
+    return false;
+  }
+};
 import {
   OrdersMenuIcon,
   OrdersBellIcon,
@@ -102,6 +173,10 @@ const QcUploadScreen: React.FC<{navigation?: any; route?: any}> = ({
   const [uploadingKind, setUploadingKind] = useState<
     'material' | 'packaging' | null
   >(null);
+  // Which category's source chooser (Camera/Gallery/Files) is open.
+  const [sheetKind, setSheetKind] = useState<'material' | 'packaging' | null>(
+    null,
+  );
   const [submitting, setSubmitting] = useState(false);
 
   const canSubmit =
@@ -111,35 +186,22 @@ const QcUploadScreen: React.FC<{navigation?: any; route?: any}> = ({
     !uploadingKind &&
     !!orderId;
 
-  // Pick a photo from the gallery, upload it to S3, and store the returned URL
-  // so the admin can review the actual images during QC approval.
-  const pickAndUpload = async (kind: 'material' | 'packaging') => {
+  // Tapping "Choose Files" opens the source sheet for that category.
+  const openSourceSheet = (kind: 'material' | 'packaging') => {
     if (uploadingKind) return;
+    setSheetKind(kind);
+  };
+
+  // Shared: convert a picked file to a data URI, upload it, and store the URL.
+  const uploadAndStore = async (
+    kind: 'material' | 'packaging',
+    uri: string,
+    type?: string | null,
+    name?: string | null,
+  ) => {
     try {
-      const res = await launchImageLibrary({
-        mediaType: 'photo',
-        quality: 0.7,
-        maxWidth: 2000,
-        maxHeight: 2000,
-        selectionLimit: 1,
-        includeBase64: true,
-      });
-      if (res.didCancel) return;
-      if (res.errorCode === 'permission') {
-        Alert.alert(
-          'Permission needed',
-          'Enable photo access in Settings to add QC photos.',
-        );
-        return;
-      }
-      const asset = res.assets?.[0];
-      if (!asset?.base64) {
-        Alert.alert('Could not read image', 'Please try another photo.');
-        return;
-      }
-      const mime = asset.type || 'image/jpeg';
-      const dataUri = `data:${mime};base64,${asset.base64}`;
       setUploadingKind(kind);
+      const dataUri = await fileToDataUri(uri, type, name);
       const url = await uploadVendorImage(dataUri);
       if (kind === 'material') setMaterialPhotos(prev => [...prev, url]);
       else setPackagingPhotos(prev => [...prev, url]);
@@ -150,6 +212,69 @@ const QcUploadScreen: React.FC<{navigation?: any; route?: any}> = ({
       );
     } finally {
       setUploadingKind(null);
+    }
+  };
+
+  const handleCamera = async (kind: 'material' | 'packaging') => {
+    setSheetKind(null);
+    const allowed = await ensureCameraPermission();
+    if (!allowed) {
+      Alert.alert(
+        'Camera permission needed',
+        'Enable camera access in Settings to take a photo.',
+      );
+      return;
+    }
+    try {
+      const res = await launchCamera({
+        mediaType: 'photo',
+        quality: 0.7,
+        maxWidth: 2000,
+        maxHeight: 2000,
+        saveToPhotos: false,
+      });
+      if (res.didCancel) return;
+      const asset = res.assets?.[0];
+      if (!asset?.uri) return;
+      await uploadAndStore(kind, asset.uri, asset.type, asset.fileName);
+    } catch {
+      Alert.alert('Error', 'Could not open the camera.');
+    }
+  };
+
+  const handleGallery = async (kind: 'material' | 'packaging') => {
+    setSheetKind(null);
+    try {
+      const res = await launchImageLibrary({
+        mediaType: 'photo',
+        quality: 0.7,
+        maxWidth: 2000,
+        maxHeight: 2000,
+        selectionLimit: 1,
+      });
+      if (res.didCancel) return;
+      const asset = res.assets?.[0];
+      if (!asset?.uri) return;
+      await uploadAndStore(kind, asset.uri, asset.type, asset.fileName);
+    } catch {
+      Alert.alert('Error', 'Could not open the gallery.');
+    }
+  };
+
+  const handleFiles = async (kind: 'material' | 'packaging') => {
+    setSheetKind(null);
+    try {
+      const [doc] = await pick({
+        type: [docTypes.images, docTypes.pdf],
+        allowMultiSelection: false,
+      });
+      if (!doc?.uri) return;
+      await uploadAndStore(kind, doc.uri, doc.type, doc.name);
+    } catch (err: any) {
+      if (isErrorWithCode(err) && err.code === errorCodes.OPERATION_CANCELED) {
+        return;
+      }
+      Alert.alert('Error', 'Could not open the file manager.');
     }
   };
 
@@ -265,14 +390,14 @@ const QcUploadScreen: React.FC<{navigation?: any; route?: any}> = ({
           description="Upload clear front view of material"
           hint={uploadingKind === 'material' ? 'Uploading…' : 'Auto timestamp will be added'}
           selected={materialPhotos.length}
-          onChoose={() => pickAndUpload('material')}
+          onChoose={() => openSourceSheet('material')}
         />
         <UploadCard
           label="Packaging Photos"
           description="Upload packaging and labeling photos"
           hint={uploadingKind === 'packaging' ? 'Uploading…' : ''}
           selected={packagingPhotos.length}
-          onChoose={() => pickAndUpload('packaging')}
+          onChoose={() => openSourceSheet('packaging')}
         />
 
         {/* Guidelines */}
@@ -328,6 +453,81 @@ const QcUploadScreen: React.FC<{navigation?: any; route?: any}> = ({
           )}
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Source chooser: Camera / Gallery / Files */}
+      <Modal
+        visible={sheetKind !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSheetKind(null)}>
+        <Pressable
+          onPress={() => setSheetKind(null)}
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.4)',
+            justifyContent: 'flex-end',
+          }}>
+          <Pressable
+            onPress={() => {}}
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              paddingTop: 20,
+              paddingBottom: 24,
+              paddingHorizontal: 14,
+              gap: 10,
+            }}>
+            <Text
+              className="font-poppins-bold"
+              style={{
+                color: '#404040',
+                fontSize: 16,
+                textAlign: 'center',
+                marginBottom: 6,
+              }}>
+              Add Photo
+            </Text>
+            {[
+              {label: 'Take Photo', fn: handleCamera},
+              {label: 'Choose from Gallery', fn: handleGallery},
+              {label: 'Choose File (PDF / Image)', fn: handleFiles},
+            ].map(opt => (
+              <TouchableOpacity
+                key={opt.label}
+                onPress={() => sheetKind && opt.fn(sheetKind)}
+                style={{
+                  height: 48,
+                  borderRadius: 12,
+                  backgroundColor: '#FFE403',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}>
+                <Text
+                  className="font-poppins-semibold"
+                  style={{color: '#404040', fontSize: 14}}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              onPress={() => setSheetKind(null)}
+              style={{
+                height: 48,
+                borderRadius: 12,
+                backgroundColor: '#F5F5F5',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+              <Text
+                className="font-poppins-semibold"
+                style={{color: '#757575', fontSize: 14}}>
+                Cancel
+              </Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <BottomNavBar activeTab="Orders" />
     </View>
