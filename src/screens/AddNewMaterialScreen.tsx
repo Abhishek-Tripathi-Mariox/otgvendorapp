@@ -14,6 +14,8 @@ import BottomNavBar from '../components/BottomNavBar';
 import KeyboardAwareScrollView from '../components/KeyboardAwareScrollView';
 import {useSidebar} from '../components/SidebarProvider';
 import NotificationBell from '../components/NotificationBell';
+import {launchImageLibrary} from 'react-native-image-picker';
+import {uploadVendorImage} from '../services/orders';
 import {
   InventoryMenuIcon,
   InventoryBellIcon,
@@ -67,7 +69,49 @@ const AddNewMaterialScreen: React.FC<{navigation?: any; route?: any}> = ({
   const [unitOpen, setUnitOpen] = useState(false);
   const [price, setPrice] = useState('');
   const [description, setDescription] = useState('');
+  const [images, setImages] = useState<string[]>([]);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Pick a material image, upload it to S3, and keep the returned URL.
+  const pickMaterialImage = async () => {
+    if (uploadingImage) return;
+    try {
+      const res = await launchImageLibrary({
+        mediaType: 'photo',
+        quality: 0.7,
+        maxWidth: 2000,
+        maxHeight: 2000,
+        selectionLimit: 1,
+        includeBase64: true,
+      });
+      if (res.didCancel) return;
+      if (res.errorCode === 'permission') {
+        Alert.alert(
+          'Permission needed',
+          'Enable photo access in Settings to add a material image.',
+        );
+        return;
+      }
+      const asset = res.assets?.[0];
+      if (!asset?.base64) {
+        Alert.alert('Could not read image', 'Please try another photo.');
+        return;
+      }
+      const mime = asset.type || 'image/jpeg';
+      const dataUri = `data:${mime};base64,${asset.base64}`;
+      setUploadingImage(true);
+      const url = await uploadVendorImage(dataUri);
+      setImages(prev => [...prev, url]);
+    } catch (err: any) {
+      Alert.alert(
+        'Upload failed',
+        err?.response?.data?.message || err?.message || 'Please try again.',
+      );
+    } finally {
+      setUploadingImage(false);
+    }
+  };
 
   const closeAll = () => {
     setCategoryOpen(false);
@@ -194,6 +238,7 @@ const AddNewMaterialScreen: React.FC<{navigation?: any; route?: any}> = ({
         quantity: parseInt(quantity, 10),
         specs: unit ? `Unit: ${unit}` : undefined,
         description: description || undefined,
+        images: images.length ? images : undefined,
       });
       navigation?.navigate('Dashboard', {
         successMessage:
@@ -648,21 +693,60 @@ const AddNewMaterialScreen: React.FC<{navigation?: any; route?: any}> = ({
           Material Images
         </Text>
         <TouchableOpacity
-          className="bg-white rounded-lg border border-dashed border-[#d1d5db] items-center justify-center mb-4"
+          className="bg-white rounded-lg border border-dashed border-[#d1d5db] items-center justify-center mb-3"
           style={{height: 140, gap: 8}}
-          activeOpacity={0.7}>
-          <CloudUploadLargeIcon size={40} color="#99A1AF" />
+          activeOpacity={0.7}
+          disabled={uploadingImage}
+          onPress={pickMaterialImage}>
+          {uploadingImage ? (
+            <ActivityIndicator color="#E48714" />
+          ) : (
+            <CloudUploadLargeIcon size={40} color="#99A1AF" />
+          )}
           <Text
             className="text-[14px] leading-[20px] text-[#6a7282]"
             style={{fontFamily: 'Poppins-SemiBold'}}>
-            Tap to upload images
+            {uploadingImage ? 'Uploading…' : 'Tap to upload images'}
           </Text>
           <Text
             className="text-[12px] leading-[16px] text-[#9ca3af]"
             style={{fontFamily: 'Poppins-Regular'}}>
-            PNG, JPG up to 5MB each
+            PNG, JPG up to 10MB each
           </Text>
         </TouchableOpacity>
+
+        {/* Selected image thumbnails */}
+        {images.length > 0 && (
+          <View className="flex-row flex-wrap mb-4" style={{gap: 8}}>
+            {images.map((uri, idx) => (
+              <View key={`${uri}-${idx}`} style={{position: 'relative'}}>
+                <Image
+                  source={{uri}}
+                  style={{width: 72, height: 72, borderRadius: 8}}
+                />
+                <TouchableOpacity
+                  onPress={() =>
+                    setImages(prev => prev.filter((_, i) => i !== idx))
+                  }
+                  style={{
+                    position: 'absolute',
+                    top: -6,
+                    right: -6,
+                    backgroundColor: '#ef4444',
+                    width: 20,
+                    height: 20,
+                    borderRadius: 10,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                  <Text style={{color: '#fff', fontSize: 12, lineHeight: 14}}>
+                    ×
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Info Note */}
         <View

@@ -12,7 +12,8 @@ import {
 import BottomNavBar from '../components/BottomNavBar';
 import {useSidebar} from '../components/SidebarProvider';
 import NotificationBell from '../components/NotificationBell';
-import {submitVendorQc} from '../services/orders';
+import {launchImageLibrary} from 'react-native-image-picker';
+import {submitVendorQc, uploadVendorImage} from '../services/orders';
 import {
   OrdersMenuIcon,
   OrdersBellIcon,
@@ -96,17 +97,62 @@ const QcUploadScreen: React.FC<{navigation?: any; route?: any}> = ({
 }) => {
   const {openSidebar} = useSidebar();
   const orderId = route?.params?.orderId ?? '';
-  const [materialFiles, setMaterialFiles] = useState(0);
-  const [packagingFiles, setPackagingFiles] = useState(0);
+  const [materialPhotos, setMaterialPhotos] = useState<string[]>([]);
+  const [packagingPhotos, setPackagingPhotos] = useState<string[]>([]);
+  const [uploadingKind, setUploadingKind] = useState<
+    'material' | 'packaging' | null
+  >(null);
   const [submitting, setSubmitting] = useState(false);
 
   const canSubmit =
-    materialFiles > 0 && packagingFiles > 0 && !submitting && !!orderId;
+    materialPhotos.length > 0 &&
+    packagingPhotos.length > 0 &&
+    !submitting &&
+    !uploadingKind &&
+    !!orderId;
 
-  // NOTE: The QC upload UI currently only tracks photo *counts*, not real image
-  // URLs — there is no storage upload wired up yet. We submit empty photo arrays
-  // so the QC step still hits the backend and advances the order status.
-  // TODO: once image upload to storage exists, send the uploaded URLs here.
+  // Pick a photo from the gallery, upload it to S3, and store the returned URL
+  // so the admin can review the actual images during QC approval.
+  const pickAndUpload = async (kind: 'material' | 'packaging') => {
+    if (uploadingKind) return;
+    try {
+      const res = await launchImageLibrary({
+        mediaType: 'photo',
+        quality: 0.7,
+        maxWidth: 2000,
+        maxHeight: 2000,
+        selectionLimit: 1,
+        includeBase64: true,
+      });
+      if (res.didCancel) return;
+      if (res.errorCode === 'permission') {
+        Alert.alert(
+          'Permission needed',
+          'Enable photo access in Settings to add QC photos.',
+        );
+        return;
+      }
+      const asset = res.assets?.[0];
+      if (!asset?.base64) {
+        Alert.alert('Could not read image', 'Please try another photo.');
+        return;
+      }
+      const mime = asset.type || 'image/jpeg';
+      const dataUri = `data:${mime};base64,${asset.base64}`;
+      setUploadingKind(kind);
+      const url = await uploadVendorImage(dataUri);
+      if (kind === 'material') setMaterialPhotos(prev => [...prev, url]);
+      else setPackagingPhotos(prev => [...prev, url]);
+    } catch (err: any) {
+      Alert.alert(
+        'Upload failed',
+        err?.response?.data?.message || err?.message || 'Please try again.',
+      );
+    } finally {
+      setUploadingKind(null);
+    }
+  };
+
   const handleSubmit = async () => {
     if (!orderId) {
       Alert.alert('Missing order', 'Order id is missing for this QC upload.');
@@ -115,8 +161,8 @@ const QcUploadScreen: React.FC<{navigation?: any; route?: any}> = ({
     try {
       setSubmitting(true);
       await submitVendorQc(orderId, {
-        materialPhotos: [],
-        packagingPhotos: [],
+        materialPhotos,
+        packagingPhotos,
         note: 'QC submitted from vendor app',
       });
       navigation?.navigate('Dashboard', {
@@ -217,16 +263,16 @@ const QcUploadScreen: React.FC<{navigation?: any; route?: any}> = ({
         <UploadCard
           label="Material Photos"
           description="Upload clear front view of material"
-          hint="Auto timestamp will be added"
-          selected={materialFiles}
-          onChoose={() => setMaterialFiles(1)}
+          hint={uploadingKind === 'material' ? 'Uploading…' : 'Auto timestamp will be added'}
+          selected={materialPhotos.length}
+          onChoose={() => pickAndUpload('material')}
         />
         <UploadCard
           label="Packaging Photos"
           description="Upload packaging and labeling photos"
-          hint=""
-          selected={packagingFiles}
-          onChoose={() => setPackagingFiles(1)}
+          hint={uploadingKind === 'packaging' ? 'Uploading…' : ''}
+          selected={packagingPhotos.length}
+          onChoose={() => pickAndUpload('packaging')}
         />
 
         {/* Guidelines */}

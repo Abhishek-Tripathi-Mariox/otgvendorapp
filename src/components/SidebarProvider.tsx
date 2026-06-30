@@ -33,6 +33,7 @@ const ROUTE_BY_ITEM: Partial<Record<SidebarItem, string>> = {
   // on the Orders list, so route Tracking there instead of being a dead item.
   Tracking: 'OrderList',
   Payments: 'Payments',
+  Invoices: 'VendorInvoices',
   Support: 'Support',
   Profile: 'Profile',
 };

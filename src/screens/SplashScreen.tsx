@@ -29,7 +29,8 @@ const SplashScreen: React.FC<{navigation?: any}> = ({navigation}) => {
         | 'Dashboard'
         | 'RegistrationStep1'
         | 'RegistrationStep2'
-        | 'RegistrationStep3' = 'Login';
+        | 'RegistrationStep3'
+        | 'OnboardingStatus' = 'Login';
       try {
         const token = await getStoredToken();
         if (token) {

@@ -50,6 +50,7 @@ export interface VendorQuotation {
   quotedCurrency?: string;
   quotedValidTill?: string | null;
   adminNotes?: string;
+  quotationPdf?: {url: string; name?: string; uploadedAt?: string} | null;
   user?: VendorQuotationCustomer | null;
   assignedAt?: string | null;
   createdAt: string;

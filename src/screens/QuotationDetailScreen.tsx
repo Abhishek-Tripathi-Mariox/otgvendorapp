@@ -7,6 +7,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Linking,
+  Alert,
 } from 'react-native';
 import {BackArrowIcon, StatusDot} from '../assets/orders/icons';
 import {
@@ -349,6 +350,33 @@ const QuotationDetailScreen: React.FC<{navigation?: any; route?: any}> = ({
               <Field label="Notes" value={quotation.adminNotes} />
             </SectionCard>
           )}
+
+          {/* Quotation PDF uploaded by admin */}
+          {quotation.quotationPdf?.url ? (
+            <SectionCard title="Quotation Document">
+              <TouchableOpacity
+                onPress={() => {
+                  const url = quotation.quotationPdf!.url;
+                  Linking.openURL(url).catch(() => {
+                    Alert.alert('Quotation', 'Could not open the PDF.');
+                  });
+                }}
+                style={{
+                  height: 46,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: '#e48714',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}>
+                <Text
+                  className="text-[14px]"
+                  style={{fontFamily: 'Poppins-SemiBold', color: '#e48714'}}>
+                  View / Download PDF
+                </Text>
+              </TouchableOpacity>
+            </SectionCard>
+          ) : null}
         </ScrollView>
       )}
     </View>

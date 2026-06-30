@@ -22,6 +22,7 @@ import PackDispatchScreen from '../screens/PackDispatchScreen';
 import DispatchConfirmationScreen from '../screens/DispatchConfirmationScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
 import PaymentsScreen from '../screens/PaymentsScreen';
+import VendorInvoicesScreen from '../screens/VendorInvoicesScreen';
 import SupportScreen from '../screens/SupportScreen';
 import {SidebarProvider} from '../components/SidebarProvider';
 import type {VendorFulfilmentBooking} from '../services/orders';
@@ -60,6 +61,7 @@ export type RootStackParamList = {
   QuotationDetail: {id: string};
   Notifications: undefined;
   Payments: undefined;
+  VendorInvoices: undefined;
   Support: undefined;
 };
 
@@ -102,6 +104,7 @@ const AppNavigator: React.FC = () => {
         />
         <Stack.Screen name="Notifications" component={NotificationsScreen} />
         <Stack.Screen name="Payments" component={PaymentsScreen} />
+        <Stack.Screen name="VendorInvoices" component={VendorInvoicesScreen} />
         <Stack.Screen name="Support" component={SupportScreen} />
       </Stack.Navigator>
       </SidebarProvider>

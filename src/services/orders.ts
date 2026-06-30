@@ -206,6 +206,15 @@ export const submitVendorQc = async (
   return res.data?.data as VendorFulfilmentBooking;
 };
 
+// Uploads one image (base64 data URI) to S3 and returns its public URL.
+// Used for QC photos and vendor material images.
+export const uploadVendorImage = async (
+  dataUri: string,
+): Promise<string> => {
+  const res = await api.post('/vendor/orders/upload', {file: dataUri});
+  return res.data?.data?.url as string;
+};
+
 export interface PackVendorOrderPayload {
   note?: string;
 }

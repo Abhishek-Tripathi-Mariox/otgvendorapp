@@ -42,6 +42,8 @@ export interface VendorProfile {
   };
   onboardingStep?: VendorOnboardingStep;
   status?: 'active' | 'inactive';
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+  rejectionReason?: string;
   isVerified?: boolean;
   addedByAdmin?: boolean;
 }
@@ -50,7 +52,12 @@ export interface VendorProfile {
 // onboarding progress. "completed" (and admin-created vendors) go to Dashboard.
 export const onboardingRoute = (
   vendor?: VendorProfile | null,
-): 'Dashboard' | 'RegistrationStep1' | 'RegistrationStep2' | 'RegistrationStep3' => {
+):
+  | 'Dashboard'
+  | 'RegistrationStep1'
+  | 'RegistrationStep2'
+  | 'RegistrationStep3'
+  | 'OnboardingStatus' => {
   switch (vendor?.onboardingStep) {
     case 'business':
       return 'RegistrationStep1';
@@ -59,6 +66,14 @@ export const onboardingRoute = (
     case 'documents':
       return 'RegistrationStep3';
     default:
+      // Onboarding complete — but if the vendor is awaiting approval or was
+      // rejected, send them to the status screen instead of the dashboard.
+      if (
+        vendor?.approvalStatus === 'pending' ||
+        vendor?.approvalStatus === 'rejected'
+      ) {
+        return 'OnboardingStatus';
+      }
       return 'Dashboard';
   }
 };
@@ -167,6 +182,20 @@ export const submitDocumentsStep = async (documents: {
 export const fetchMe = async (): Promise<VendorProfile> => {
   const {data} = await api.get('/vendor/auth/me');
   return data.data as VendorProfile;
+};
+
+// A rejected vendor re-submits their application (optionally updated docs).
+// Moves approvalStatus back to "pending".
+export const reapplyVendor = async (documents?: {
+  gstCertificate?: string;
+  panCard?: string;
+  tradeLicense?: string;
+  bankCheque?: string;
+}): Promise<VendorProfile> => {
+  const {data} = await api.post('/vendor/auth/onboarding/reapply', {
+    documents,
+  });
+  return persistStep(data.data);
 };
 
 export type VendorProfileUpdate = Partial<{

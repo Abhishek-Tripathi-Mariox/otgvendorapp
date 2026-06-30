@@ -165,8 +165,12 @@ const OrderDetailScreen: React.FC<{navigation?: any; route?: any}> = ({
     status === 'QC Approved' || status === 'Packed';
   const isDispatchedOrDelivered =
     status === 'Dispatched' || status === 'Delivered';
-  const showAcceptReject =
-    status === 'Pending' || status === 'Accepted' || status === 'QC Pending';
+  // Only a brand-new order can be accepted/rejected.
+  const showAcceptReject = status === 'Pending';
+  // Accepted but QC photos not uploaded yet -> let the vendor upload them.
+  const isAccepted = status === 'Accepted';
+  // QC submitted, waiting for admin approval -> no packing yet.
+  const isQcPending = status === 'QC Pending';
 
   const handleAccept = async () => {
     if (!order) return;
@@ -483,6 +487,43 @@ const OrderDetailScreen: React.FC<{navigation?: any; route?: any}> = ({
                 </>
               )}
             </TouchableOpacity>
+          </View>
+        ) : isAccepted ? (
+          // Accepted — vendor must upload QC photos for admin review first.
+          <TouchableOpacity
+            className="rounded-xl flex-row items-center justify-center bg-[#ffe403]"
+            style={{height: 58, gap: 8}}
+            activeOpacity={0.8}
+            onPress={() => navigation?.navigate('QcUpload', {orderId})}>
+            <QrCodeIcon size={20} color="#404040" />
+            <Text
+              className="text-[16px] leading-[24px] text-primary"
+              style={{fontFamily: 'Poppins-SemiBold'}}>
+              Upload QC Photos
+            </Text>
+          </TouchableOpacity>
+        ) : isQcPending ? (
+          // QC submitted — waiting for admin to review & approve before packing.
+          <View
+            className="rounded-xl items-center justify-center"
+            style={{
+              minHeight: 58,
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              backgroundColor: 'rgba(255,152,0,0.13)',
+              borderWidth: 1,
+              borderColor: '#ff9800',
+            }}>
+            <Text
+              className="text-[15px] leading-[22px] text-center"
+              style={{fontFamily: 'Poppins-SemiBold', color: '#ff9800'}}>
+              Waiting for admin QC approval
+            </Text>
+            <Text
+              className="text-[12px] leading-[18px] text-center"
+              style={{fontFamily: 'Poppins-Regular', color: '#6a7282'}}>
+              You can pack the order once the admin approves your QC photos.
+            </Text>
           </View>
         ) : isQcApprovedOrPacked ? (
           <TouchableOpacity
